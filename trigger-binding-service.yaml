@@ -1,0 +1,39 @@
+
+apiVersion: triggers.tekton.dev/v1beta1
+
+kind: TriggerBinding
+
+metadata:
+
+  name: service-build-binding
+
+  namespace: online-boutique-ci
+
+spec:
+
+  params:
+
+  - name: git-repo-url
+
+    value: $(body.repository.clone_url)
+
+  - name: git-revision
+
+    value: $(body.after)
+
+  - name: git-commit-id
+
+    value: $(body.after)
+
+  - name: service-name
+
+    value: $(extensions.trigger.service)
+
+  - name: dockerfile-path
+
+    value: $(extensions.trigger.path)
+
+  - name: context-path
+
+    value: $(extensions.trigger.context)
+

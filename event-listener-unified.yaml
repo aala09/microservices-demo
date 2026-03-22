@@ -1,0 +1,49 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: unified-listener
+  namespace: online-boutique-ci
+spec:
+  serviceAccountName: pipeline
+  triggers:
+  # Trigger pour le FRONTEND
+  - name: frontend-trigger
+    interceptors:
+    - ref:
+        name: cel
+      params:
+      - name: filter
+        value: "body.commits.exists(commit, commit.modified.exists(file, file.startsWith('src/frontend/')))"
+      - name: overlays
+        value:
+        - key: trigger.service
+          expression: "'frontend'"
+        - key: trigger.path
+          expression: "'src/frontend/Dockerfile'"
+        - key: trigger.context
+          expression: "'src/frontend'"
+    bindings:
+    - ref: frontend-build-binding
+    template:
+      ref: frontend-build-template
+
+  # Trigger pour les AUTRES SERVICES
+  - name: service-trigger
+    interceptors:
+    - ref:
+        name: cel
+      params:
+      - name: filter
+        value: "body.commits.exists(commit, commit.modified.exists(file, file.startsWith('src/') && !file.startsWith('src/frontend/')))"
+      - name: overlays
+        value:
+        - key: trigger.service
+          expression: "body.commits[0].modified[0].split('/')[1]"
+        - key: trigger.path
+          expression: "body.commits[0].modified[0]"
+        - key: trigger.context
+          expression: "body.commits[0].modified[0].substring(0, body.commits[0].modified[0].lastIndexOf('/'))"
+    bindings:
+    - ref: service-build-binding
+    template:
+      ref: service-build-template

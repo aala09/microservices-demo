@@ -1,0 +1,95 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: build-and-update-service
+  namespace: online-boutique-ci
+spec:
+  params:
+  - description: URL du dépôt de code source
+    name: repo-url
+    type: string
+  - default: master
+    description: Révision à builder
+    name: revision
+    type: string
+  - default: image-registry.openshift-image-registry.svc:5000/online-boutique-ci/frontend
+    description: Nom de l'image
+    name: image-name
+    type: string
+  - description: URL du dépôt de configuration
+    name: config-repo
+    type: string
+  - default: master
+    description: Branche du dépôt de config
+    name: config-branch
+    type: string
+  - default: frontend.yaml
+    description: Fichier YAML à modifier
+    name: config-file
+    type: string
+  - name: context-dir
+    description: Dossier contenant le Dockerfile
+    type: string
+    default: src/frontend
+  tasks:
+  - name: clone-source
+    params:
+    - name: url
+      value: $(params.repo-url)
+    - name: revision
+      value: $(params.revision)
+    taskRef:
+      kind: ClusterTask
+      name: git-clone
+    workspaces:
+    - name: output
+      workspace: source
+  - name: build-image
+    params:
+    - name: IMAGE
+      value: $(params.image-name):$(tasks.clone-source.results.commit)
+    - name: TLSVERIFY
+      value: "false"
+    - name: STORAGE_DRIVER
+      value: vfs
+    - name: CONTEXT
+      value: $(workspaces.source.path)/$(params.context-dir)
+    - name: DOCKERFILE
+      value: Dockerfile
+    runAfter:
+    - clone-source
+    taskRef:
+      kind: ClusterTask
+      name: buildah
+    workspaces:
+    - name: source
+      workspace: source
+  - name: update-config
+    params:
+    - name: CONFIG_REPO
+      value: $(params.config-repo)
+    - name: CONFIG_BRANCH
+      value: $(params.config-branch)
+    - name: FILE_PATH
+      value: $(params.config-file)
+    - name: NEW_IMAGE
+      value: $(params.image-name):$(tasks.clone-source.results.commit)
+    - name: GIT_USER
+      value: pipeline-bot
+    - name: GIT_EMAIL
+      value: pipeline@example.com
+    runAfter:
+    - build-image
+    taskRef:
+      kind: Task
+      name: git-update
+    workspaces:
+    - name: source
+      workspace: config-source
+  workspaces:
+  - name: source
+    description: Workspace pour le code source
+  - name: config-source
+    description: Workspace pour le dépôt de config
+  - name: git-credentials
+    optional: true

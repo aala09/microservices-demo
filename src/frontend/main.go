@@ -24,6 +24,8 @@ import (
 	"cloud.google.com/go/profiler"
 	"github.com/gorilla/mux"
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -58,6 +60,31 @@ var (
 	baseUrl = ""
 )
 
+// Métriques Prometheus
+var (
+	httpRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "Total number of HTTP requests",
+		},
+		[]string{"method", "path", "status"},
+	)
+
+	httpRequestDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "HTTP request duration in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+		[]string{"method", "path"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(httpRequestsTotal)
+	prometheus.MustRegister(httpRequestDuration)
+}
+
 type ctxKeySessionID struct{}
 
 type frontendServer struct {
@@ -86,6 +113,28 @@ type frontendServer struct {
 	collectorConn *grpc.ClientConn
 
 	shoppingAssistantSvcAddr string
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func metricsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		next.ServeHTTP(recorder, r)
+		duration := time.Since(start).Seconds()
+
+		httpRequestsTotal.WithLabelValues(r.Method, r.URL.Path, fmt.Sprintf("%d", recorder.status)).Inc()
+		httpRequestDuration.WithLabelValues(r.Method, r.URL.Path).Observe(duration)
+	})
 }
 
 func main() {
@@ -147,6 +196,15 @@ func main() {
 	mustConnGRPC(ctx, &svc.adSvcConn, svc.adSvcAddr)
 
 	r := mux.NewRouter()
+
+	// Appliquer le middleware des métriques
+	r.Use(metricsMiddleware)
+
+	// Ajouter l'endpoint /metrics pour Prometheus
+	r.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		promhttp.Handler().ServeHTTP(w, r)
+	}).Methods(http.MethodGet)
+
 	r.HandleFunc(baseUrl+"/", svc.homeHandler).Methods(http.MethodGet, http.MethodHead)
 	r.HandleFunc(baseUrl+"/product/{id}", svc.productHandler).Methods(http.MethodGet, http.MethodHead)
 	r.HandleFunc(baseUrl+"/cart", svc.viewCartHandler).Methods(http.MethodGet, http.MethodHead)
@@ -170,6 +228,7 @@ func main() {
 	log.Infof("starting server on %s:%s", addr, srvPort)
 	log.Fatal(http.ListenAndServe(addr+":"+srvPort, handler))
 }
+
 func initStats(log logrus.FieldLogger) {
 	// TODO(arbrown) Implement OpenTelemtry stats
 }

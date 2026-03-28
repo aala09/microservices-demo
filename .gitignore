@@ -1,3 +1,8 @@
+# Ignorer les fichiers sensibles
+
+anomaly-detector-token.yaml
+
+*.secret.yaml
 .DS_Store
 .eclipse.buildship.core.prefs
 .gradle/

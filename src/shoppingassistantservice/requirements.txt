@@ -42,7 +42,7 @@ google-api-core[grpc]==2.25.1
     #   google-cloud-core
     #   google-cloud-secret-manager
     #   google-cloud-storage
-google-auth[requests]==2.45.0
+google-auth[requests]==2.29.0
     # via
     #   google-api-core
     #   google-cloud-alloydb
